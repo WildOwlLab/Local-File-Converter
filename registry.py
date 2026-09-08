@@ -5,12 +5,17 @@ underneath never needs to change for a new pair.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from detect import CATEGORY_BY_EXT
-from handlers import (calibre_handler, ffmpeg_handler, imagemagick_handler,
-                      libreoffice_handler, pandoc_handler)
+from handlers import (
+    calibre_handler,
+    ffmpeg_handler,
+    imagemagick_handler,
+    libreoffice_handler,
+    pandoc_handler,
+)
 
 Handler = Callable[..., object]
 
@@ -180,7 +185,7 @@ def find_chain(source_ext: str, target_ext: str) -> list[Route] | None:
     """
     mids = []
     for (src, mid), first in ROUTE_MAP.items():
-        if src != source_ext or mid == target_ext or mid == source_ext:
+        if src != source_ext or mid in (target_ext, source_ext):
             continue
         second = ROUTE_MAP.get((mid, target_ext))
         if second is not None:

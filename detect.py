@@ -8,6 +8,7 @@ take the server down at startup. See probe_libmagic().
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import zipfile
@@ -53,7 +54,6 @@ _SIGNATURES: list[tuple[int, bytes, str, str]] = [
     (0, b"\xff\xd8\xff", "jpg", "image/jpeg"),
     (0, b"GIF87a", "gif", "image/gif"),
     (0, b"GIF89a", "gif", "image/gif"),
-    (0, b"BM", "bmp", "image/bmp"),
     (0, b"II*\x00", "tiff", "image/tiff"),
     (0, b"MM\x00*", "tiff", "image/tiff"),
     (0, b"\x00\x00\x01\x00", "ico", "image/x-icon"),
@@ -64,6 +64,24 @@ _SIGNATURES: list[tuple[int, bytes, str, str]] = [
     (0, b"ID3", "mp3", "audio/mpeg"),
     (0, b"BOOKMOBI", "mobi", "application/x-mobipocket-ebook"),
 ]
+
+# Byte-order marks. Recognising these up front keeps a UTF-16 text file from
+# being claimed by the MP3 frame heuristic, since \xff\xfe satisfies the sync
+# word.
+_BOMS: tuple[tuple[bytes, str], ...] = (
+    (b"\xef\xbb\xbf", "utf-8"),
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+)
+
+
+def _bom_encoding(head: bytes) -> str | None:
+    for mark, encoding in _BOMS:
+        if head.startswith(mark):
+            return encoding
+    return None
 
 
 def _read_head(path: Path, n: int = 4096) -> bytes:
@@ -176,11 +194,44 @@ def _sniff_zip_container(path: Path) -> tuple[str, str] | None:
         return None
 
 
+def _sniff_bmp(head: bytes, size: int) -> tuple[str, str] | None:
+    """BMP, validated beyond its two-byte magic.
+
+    "BM" alone is far too weak to be a signature: plenty of ordinary text
+    starts with those letters, and matching on them alone routed Markdown
+    files to ImageMagick. A real BMP also declares its own length, keeps four
+    reserved zero bytes, and points at a plausible pixel-data offset.
+    """
+    if head[:2] != b"BM" or len(head) < 14:
+        return None
+    if head[6:10] != b"\x00\x00\x00\x00":  # reserved, must be zero
+        return None
+    declared = int.from_bytes(head[2:6], "little")
+    offset = int.from_bytes(head[10:14], "little")
+    if declared != size or not (26 <= offset < declared):
+        return None
+    return "bmp", "image/bmp"
+
+
 def _sniff_mpeg_audio(head: bytes) -> tuple[str, str] | None:
-    """MP3 frames with no ID3 tag: 11 sync bits at the start of the stream."""
-    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
-        return "mp3", "audio/mpeg"
-    return None
+    """MP3 frames with no ID3 tag.
+
+    The 11 sync bits on their own match far too much: any file starting
+    0xFF 0xEx-0xFx qualifies, including a UTF-16 byte-order mark. So the rest
+    of the frame header is validated too -- the version, layer, bitrate and
+    sample-rate fields all have values that a real frame never uses.
+    """
+    if len(head) < 4:
+        return None
+    if head[0] != 0xFF or (head[1] & 0xE0) != 0xE0:
+        return None
+    version = (head[1] >> 3) & 0x03      # 01 is reserved
+    layer = (head[1] >> 1) & 0x03        # 00 is reserved
+    bitrate = (head[2] >> 4) & 0x0F      # 0000 is "free", 1111 is invalid
+    sample_rate = (head[2] >> 2) & 0x03  # 11 is reserved
+    if version == 1 or layer == 0 or bitrate in (0, 15) or sample_rate == 3:
+        return None
+    return "mp3", "audio/mpeg"
 
 
 _TEXT_EXTS = {"md", "html", "txt", "csv", "rst", "tex", "svg", "json", "xml"}
@@ -188,18 +239,54 @@ _TEXT_MIMES = {"md": "text/markdown", "html": "text/html",
                "csv": "text/csv", "svg": "image/svg+xml"}
 
 
+_TAG_START = re.compile(r"<([A-Za-z][\w:.-]*)")
+
+
+def _root_element(text: str) -> str:
+    """Name of the document's first real element, lowercased.
+
+    Skips the XML declaration, comments and the DOCTYPE. Matching on a
+    substring instead would call any HTML page with an inline `<svg>` chart an
+    SVG image, and hand it to ImageMagick.
+    """
+    index, length = 0, len(text)
+    while index < length:
+        start = text.find("<", index)
+        if start < 0:
+            return ""
+        if text.startswith("<?", start):          # <?xml ... ?>
+            end = text.find("?>", start)
+            index = end + 2 if end >= 0 else length
+        elif text.startswith("<!--", start):      # comment
+            end = text.find("-->", start)
+            index = end + 3 if end >= 0 else length
+        elif text.startswith("<!", start):        # <!DOCTYPE ...>
+            end = text.find(">", start)
+            index = end + 1 if end >= 0 else length
+        else:
+            match = _TAG_START.match(text, start)
+            return match.group(1).lower() if match else ""
+    return ""
+
+
 def _sniff_text(head: bytes, claimed_ext: str) -> tuple[str, str] | None:
-    """Text formats carry no magic bytes: verify it decodes, then trust the extension."""
+    """Text formats carry no magic bytes: verify it decodes, then look at it."""
+    encoding = _bom_encoding(head) or "utf-8"
     try:
-        text = head.decode("utf-8")
-    except UnicodeDecodeError:
+        text = head.decode(encoding)
+    except (UnicodeDecodeError, LookupError):
         return None
+    if text and text[0] == "﻿":
+        text = text[1:]
+    # A truncated multi-byte character at the 4 KB boundary is not a NUL, but a
+    # genuine binary file usually has one early.
     if "\x00" in text:
         return None
-    lowered = text.lstrip()[:512].lower()
-    if "<svg" in text[:2048].lower():
+
+    root = _root_element(text[:4096])
+    if root == "svg":
         return "svg", "image/svg+xml"
-    if lowered.startswith(("<!doctype html", "<html")):
+    if root == "html":
         return "html", "text/html"
     if claimed_ext in _TEXT_EXTS:
         return claimed_ext, _TEXT_MIMES.get(claimed_ext, "text/plain")
@@ -222,10 +309,15 @@ def sniff(path: Path, claimed_ext: str = "") -> tuple[str, str] | None:
     for offset, magic, ext, mime in _SIGNATURES:
         if head[offset:offset + len(magic)] == magic:
             return ext, mime
-    hit = _sniff_mpeg_audio(head)
+    hit = _sniff_bmp(head, path.stat().st_size)
     if hit:
         return hit
-    return _sniff_text(head, claimed_ext)
+    # Text is checked before the bare MP3 frame heuristic: the heuristic is the
+    # loosest test here, so anything that reads as text should win first.
+    hit = _sniff_text(head, claimed_ext)
+    if hit:
+        return hit
+    return _sniff_mpeg_audio(head)
 
 
 # ------------------------------------------------------------------ libmagic

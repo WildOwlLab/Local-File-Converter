@@ -6,6 +6,7 @@ startup and on an interval.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import threading
@@ -127,13 +128,57 @@ class JobStore:
         return removed
 
 
+@dataclass
+class Pending:
+    """An upload that has been identified but has no target format yet."""
+    token: str
+    path: Path
+    filename: str
+    size: int
+    created_at: float = field(default_factory=time.time)
+
+
+class PendingStore:
+    """Uploads held between the identify request and the convert request.
+
+    Without this the browser has to send the same bytes twice -- once to ask
+    what the file is, once to convert it -- which on a 500 MB video is half a
+    gigabyte of pointless I/O.
+    """
+
+    def __init__(self) -> None:
+        self._items: dict[str, Pending] = {}
+        self._lock = threading.Lock()
+
+    def add(self, path: Path, filename: str, size: int) -> Pending:
+        pending = Pending(token=uuid.uuid4().hex[:16], path=path,
+                          filename=filename, size=size)
+        with self._lock:
+            self._items[pending.token] = pending
+        return pending
+
+    def take(self, token: str) -> Pending | None:
+        """Claim an upload. Removing it on read keeps one token to one job."""
+        with self._lock:
+            return self._items.pop(token, None)
+
+    def sweep(self, max_age: float = MAX_AGE_SECONDS) -> int:
+        cutoff = time.time() - max_age
+        with self._lock:
+            stale = [p for p in self._items.values() if p.created_at < cutoff]
+            for pending in stale:
+                del self._items[pending.token]
+        for pending in stale:
+            with contextlib.suppress(OSError):
+                pending.path.unlink(missing_ok=True)
+        return len(stale)
+
+
 def _remove_job_files(job: Job) -> None:
     for path in (job.input_path, job.output_path):
         if path:
-            try:
+            with contextlib.suppress(OSError):
                 Path(path).unlink(missing_ok=True)
-            except OSError:
-                pass
     work = TEMP_DIR / job.id
     if work.exists():
         shutil.rmtree(work, ignore_errors=True)
@@ -174,3 +219,4 @@ def sweep_temp_dir(max_age: float = MAX_AGE_SECONDS) -> int:
 
 
 store = JobStore()
+pending = PendingStore()

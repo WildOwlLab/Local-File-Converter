@@ -1,77 +1,109 @@
 # Local File Converter
 
 Drag a file into a browser tab, get it back in another format. Everything runs
-on `localhost` and nothing is uploaded anywhere.
+on `localhost`, and nothing you drop on it is uploaded anywhere.
 
-This app is a **router**, not a converter. It identifies what a file actually
-is, picks the right tool for the job, runs it, and hands back the result. The
+This is a **router, not a converter**. It works out what a file actually is,
+picks the right tool for the job, runs it, and hands back the result. The
 conversion work itself is done by FFmpeg, ImageMagick, Pandoc, LibreOffice and
-Calibre.
+Calibre — battle-tested tools that already do this better than any hand-rolled
+code would.
+
+**192 conversion routes** across images, video, audio, documents, spreadsheets,
+slides and ebooks.
+
+---
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Installing the conversion tools](#installing-the-conversion-tools)
+- [Supported conversions](#supported-conversions)
+- [Configuration](#configuration)
+- [API](#api)
+- [How it works](#how-it-works)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
 ## Quick start
 
+```bash
+git clone https://github.com/at14995/local-file-converter.git
+cd local-file-converter
+```
+
+**Windows**
+
 ```powershell
 .\run.ps1
 ```
 
-Then open <http://127.0.0.1:8000>. On macOS or Linux use `./run.sh`.
+**macOS / Linux**
 
-The script creates a virtualenv and installs dependencies on first run. To do
-it by hand:
+```bash
+./run.sh
+```
+
+Either script creates a virtualenv, installs dependencies, and starts the
+server. Open <http://127.0.0.1:8000> and drop a file on the page.
+
+By hand, if you prefer:
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python -m uvicorn main:app --port 8000
+.venv/bin/python -m pip install -r requirements.txt   # .venv\Scripts on Windows
+.venv/bin/python -m uvicorn main:app --port 8000
 ```
 
-## The five external tools
+Requires **Python 3.11+**.
 
-The app checks for these on startup and at `GET /health`; the page shows a
-banner naming anything missing. Nothing crashes when a tool is absent —
-conversions that need it are refused with an explanation and an install hint.
+## Installing the conversion tools
 
-| Tool | Command | Handles | Install (Windows) |
-|---|---|---|---|
-| ImageMagick | `magick` | images | `winget install ImageMagick.ImageMagick` |
-| FFmpeg | `ffmpeg` | video, audio | `winget install Gyan.FFmpeg` |
-| Pandoc | `pandoc` | markup | `winget install JohnMacFarlane.Pandoc` |
-| LibreOffice | `soffice` | office documents | `winget install TheDocumentFoundation.LibreOffice` |
-| Calibre | `ebook-convert` | ebooks | `winget install calibre.calibre` |
+None of these are bundled. The app checks for them at startup and at
+`GET /health`, and the page shows a banner naming anything missing. Nothing
+crashes when a tool is absent — conversions that need it are refused with an
+explanation and an install command, and everything else keeps working. Install
+only the ones you need.
 
-On macOS: `brew install imagemagick ffmpeg pandoc`, plus the LibreOffice and
-Calibre casks.
+| Tool | Handles | Windows | macOS | Debian / Ubuntu |
+|---|---|---|---|---|
+| ImageMagick | images | `winget install ImageMagick.ImageMagick` | `brew install imagemagick` | `sudo apt install imagemagick` |
+| FFmpeg | video, audio | `winget install Gyan.FFmpeg` | `brew install ffmpeg` | `sudo apt install ffmpeg` |
+| Pandoc | markup | `winget install JohnMacFarlane.Pandoc` | `brew install pandoc` | `sudo apt install pandoc` |
+| LibreOffice | office documents | `winget install TheDocumentFoundation.LibreOffice` | `brew install --cask libreoffice` | `sudo apt install libreoffice` |
+| Calibre | ebooks | `winget install calibre.calibre` | `brew install --cask calibre` | `sudo apt install calibre` |
 
-### A Windows trap worth knowing about
-
-Windows ships its own `convert.exe` in `System32` — it converts FAT volumes to
-NTFS and has nothing to do with ImageMagick. Resolving ImageMagick by the name
-`convert`, which is the usual advice on Linux, finds that instead. `binaries.py`
-prefers `magick` and explicitly refuses any `convert` that resolves inside
-`System32`. On non-Windows platforms `convert` is still accepted as the
-ImageMagick v6 name.
+Tools that install outside `PATH` are still found: versioned ImageMagick
+directories on Windows, and the `.app` bundles LibreOffice and Calibre use on
+macOS.
 
 ## Supported conversions
 
-192 routes. `GET /supported` returns the authoritative matrix; this is the
-shape of it.
+`GET /supported` returns the authoritative matrix. This is the shape of it:
 
 | Family | Sources | Targets |
 |---|---|---|
-| Images | png, jpg, webp, bmp, tiff, gif, avif, heic*, svg*, ico | png, jpg, webp, bmp, tiff, gif, avif, ico, pdf |
-| Video | mp4, mov, webm, avi, mkv | mp4, mov, webm, mkv, gif, and any audio target |
+| Images | png, jpg, webp, bmp, tiff, gif, avif, heic\*, svg\*, ico | png, jpg, webp, bmp, tiff, gif, avif, ico, pdf |
+| Video | mp4, mov, webm, avi, mkv | mp4, mov, webm, mkv, gif, plus any audio target |
 | Audio | mp3, wav, flac, ogg, m4a | mp3, wav, flac, ogg |
 | Markup | md, html, rst, txt, docx, epub | md, html, rst, txt, docx, epub |
 | Office | docx, odt, rtf, xlsx, ods, csv, pptx, odp | the rest of their own family, plus pdf |
 | Ebooks | epub, mobi, azw3, fb2 | epub, mobi, azw3, fb2, pdf |
 
-`*` input only. Anything not directly convertible is still reachable if one
-intermediate format bridges it — Markdown to PDF, EPUB to ODT, a video frame to
-PNG — and the picker labels those as two-step.
+\* input only.
+
+Pairs with no single tool behind them are still reachable through one
+intermediate format — Markdown to PDF, EPUB to ODT, a video frame to PNG. The
+format picker labels those as **two-step**, so it is always visible when a
+conversion is passing through something on the way.
 
 ## Configuration
+
+All optional, all environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -83,7 +115,7 @@ PNG — and the picker labels those as two-step.
 | `TIMEOUT_LIBREOFFICE` | `300` | |
 | `TIMEOUT_CALIBRE` | `300` | |
 
-Port is a command-line argument: `.\run.ps1 -Port 9000`.
+Port is a script argument: `.\run.ps1 -Port 9000` or `./run.sh 9000`.
 
 ## API
 
@@ -91,92 +123,119 @@ Port is a command-line argument: `.\run.ps1 -Port 9000`.
 |---|---|
 | `GET /health` | Which tools are installed, which are missing, and the upload cap |
 | `GET /supported` | The full conversion matrix, split into direct and two-step routes |
-| `POST /convert` | Multipart `file`, optional `target_format`. Without a target it only identifies the file and reports what it can become. With one it starts a job and returns a `job_id` |
-| `GET /status/{job_id}` | `queued` / `running` / `done` / `failed`, plus progress, stage, and error text |
+| `POST /convert` | Multipart `file`, optional `target_format`, optional `upload_token` |
+| `GET /status/{job_id}` | `queued` / `running` / `done` / `failed`, plus progress and error text |
 | `GET /download/{job_id}` | The converted file, once the job is `done` |
 
-```bash
-# identify a file and see what it can become
-curl -F "file=@photo.png" http://127.0.0.1:8000/convert
+`POST /convert` works two ways. Send a file and a target format together and it
+starts a job. Send a file with no target and it only identifies the file,
+reporting what it can become plus an `upload_token` — the bytes stay on the
+server, so the follow-up request sends the token instead of uploading again.
 
-# start a conversion
+```bash
+# one shot
 curl -F "file=@photo.png" -F "target_format=webp" http://127.0.0.1:8000/convert
 curl http://127.0.0.1:8000/status/<job_id>
 curl -o out.webp http://127.0.0.1:8000/download/<job_id>
+
+# two steps: ask what it is first, then convert without resending the bytes
+curl -F "file=@photo.png" http://127.0.0.1:8000/convert          # -> upload_token
+curl -F "upload_token=<token>" -F "target_format=webp" http://127.0.0.1:8000/convert
 ```
 
-## How it decides what a file is
+A token is claimed once and swept with everything else after an hour. If it has
+gone, the endpoint answers `409` with `reason: expired_token`, and the web UI
+quietly re-sends the file rather than showing an error.
 
-`detect.py` reads the file's leading bytes and identifies it from its actual
+## How it works
+
+```
+Browser (drag & drop)
+   |
+   |  POST /convert
+   v
+FastAPI
+   |-- 1. stream the upload to temp/, enforcing the size cap
+   |-- 2. identify the file from its content
+   |-- 3. look up (source, target) in the registry
+   |-- 4. if no direct route exists, find a two-step chain
+   |-- 5. run it in a background task -> subprocess
+   |-- 6. frontend polls /status/{job_id}
+   v
+Download link appears when the job is done
+```
+
+### Identifying files
+
+`detect.py` reads the leading bytes and identifies a file from its actual
 content. The extension is only a fallback for formats that have no signature at
 all (Markdown, CSV, plain text). Renaming `notes.txt` to `movie.mp4` does not
 fool it, and the UI says so rather than handing a text file to FFmpeg.
 
-Container formats that share a magic number are disambiguated properly: `RIFF`
-splits into WAV / WEBP / AVI, an ISO-BMFF `ftyp` box into MP4 / MOV / M4A /
-HEIC, EBML into MKV / WEBM, and a ZIP is opened to tell DOCX from XLSX from
-PPTX from EPUB from ODT.
+Formats that share a magic number are separated properly: `RIFF` splits into
+WAV / WEBP / AVI, an ISO-BMFF `ftyp` box into MP4 / MOV / M4A / HEIC / AVIF,
+EBML into MKV / WEBM, and a ZIP is opened to tell DOCX from XLSX from PPTX from
+EPUB from ODT.
 
-### Why not python-magic
+Weak signatures get validated rather than trusted, because a two-byte match is
+not evidence:
 
-The spec called for `python-magic`. It is supported but optional, and it is not
-the primary detector, for a concrete reason: `python-magic` is a binding to
-libmagic, and on Windows without a libmagic DLL `import magic` does not raise
-an `ImportError` — it aborts the interpreter at the DLL loader, which no
-`try`/`except` can catch. Making the server depend on that import means the
-server dies at startup on any machine missing the DLL.
+- **BMP** is more than `BM` — the header must also declare the file's real
+  length, keep its four reserved bytes zero, and point at a sane pixel offset.
+  Matching `BM` alone sends any note beginning "BMW…" to ImageMagick.
+- **MP3 without an ID3 tag** is more than the 11 sync bits — the version,
+  layer, bitrate and sample-rate fields must all hold values a real frame can
+  use. The sync bits alone are satisfied by a UTF-16 byte-order mark.
+- **SVG** is decided by the document's root element, not by finding `<svg`
+  somewhere in it, so an HTML page with an inline chart stays HTML.
+- Byte-order marks are recognised up front, so UTF-16 and UTF-8-BOM text is
+  read as text instead of being claimed by a binary heuristic.
 
-So `detect.py` implements the signature sniffing directly, and consults
-libmagic only when a subprocess probe has proved the import is safe *and*
-functional. Install `python-magic` alongside a real libmagic and it gets picked
-up automatically as a fallback for anything the built-in table does not know.
+`python-magic` is supported but optional, and deliberately not the primary
+detector. It binds to libmagic, and on Windows without a libmagic DLL
+`import magic` does not raise `ImportError` — it aborts the interpreter at the
+DLL loader, which no `try`/`except` can catch, taking the server down at
+startup. So the signature table is built in, and libmagic is consulted only
+after a subprocess probe proves the import is safe. Install `python-magic`
+alongside a real libmagic and it is picked up automatically as a fallback.
 
-## Conversion routing
+### Routing
 
 `registry.py` holds a declarative table of `(source, target) -> handler`.
 Adding a format pair means adding it to a list; no routing code changes.
 
-Two guarantees the table enforces:
-
 - **No silent duplicates.** If two tools claimed the same pair, which one ran
   would depend on table order. Building the route map raises instead.
-- **Two-step chaining, capped at two.** When no tool converts a pair directly,
-  the router looks for one intermediate format that bridges it — Markdown to
-  PDF goes `md → docx` (Pandoc) then `docx → pdf` (LibreOffice). Where several
-  intermediates would work, it prefers the one that loses the least: PNG or
-  TIFF over JPEG for images, WAV or FLAC over MP3 for audio. Anything needing
-  three hops is refused with a clear message rather than silently producing
-  something degraded.
+- **Chaining, capped at two hops.** Markdown to PDF goes `md → docx` (Pandoc)
+  then `docx → pdf` (LibreOffice). Where several intermediates would work, the
+  router prefers the one that loses least — PNG or TIFF over JPEG for images,
+  WAV or FLAC over MP3 for audio. Anything needing three hops is refused with a
+  clear message rather than quietly producing something degraded.
 
-The format picker groups two-step routes under their own heading, so it is
-always visible when a conversion is passing through an intermediate.
-
-## Handler rules
+### Running the tools
 
 Every handler in `handlers/` follows the same contract:
 
 - Arguments are built as a list. `shell=True` appears nowhere in the codebase.
 - The output path is always explicit.
 - stdout and stderr are captured; a non-zero exit becomes a `ConversionError`
-  carrying a one-line summary for the UI and the full output for the details
-  pane.
-- Every subprocess call has a timeout — 120s for images, 180s for Pandoc, 300s
-  for LibreOffice and Calibre, 600s for FFmpeg, since a video transcode is
+  with a one-line summary for the UI and the full output behind a details
+  toggle.
+- Every subprocess call has a timeout, tuned per tool — a video transcode is
   legitimately slower than a PNG resize.
 - A zero exit code is not taken as proof of success: the output file must exist
   and be non-empty. Several of these tools will happily report success and
   write nothing.
 
-Children are also tied to the server's lifetime. On a clean shutdown the
-server kills whatever is still running. For the unclean case, every child is
-placed in a Windows job object created with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
-(`process_group.py`): the job's only handle belongs to the server process, so
-when that process dies — including under `taskkill /F`, where no application
-code runs at all — the kernel closes the handle and kills everything inside.
-On POSIX children get their own process group, which covers clean shutdown but
-cannot survive a `kill -9` of the parent.
+Children are tied to the server's lifetime. A clean shutdown kills whatever is
+still running. For the unclean case, every child goes into a Windows job object
+created with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`process_group.py`): the
+job's only handle belongs to the server, so when that process dies — including
+under `taskkill /F`, where no application code runs at all — the kernel kills
+everything inside. On POSIX children get their own process group, which covers
+clean shutdown but cannot survive a `kill -9` of the parent.
 
-Two tool-specific details:
+Two tool-specific details worth knowing:
 
 - **LibreOffice** cannot be told what to name its output; it writes
   `<input-stem>.<ext>` into `--outdir`. The handler converts into a private
@@ -184,12 +243,21 @@ Two tool-specific details:
   `-env:UserInstallation=<per-job profile>`, because concurrent headless
   invocations otherwise collide over the shared user profile and one of them
   silently produces nothing.
-- **ImageMagick 7** is invoked as `magick in out`. Routing through the v6
-  compatibility shim (`magick convert`) still works but prints a deprecation
-  warning to stderr on every single run, which then gets mistaken for the
-  error message when something actually fails.
+- **ImageMagick 7** is invoked as `magick in out`. The v6 compatibility shim
+  (`magick convert`) still works but prints a deprecation warning to stderr on
+  every run, which then gets mistaken for the error message when something
+  actually fails.
 
-## Jobs and temp files
+### A Windows trap
+
+Windows ships its own `convert.exe` in `System32` — it converts FAT volumes to
+NTFS and has nothing to do with ImageMagick. Resolving ImageMagick by the name
+`convert`, which is the usual advice on Linux, finds that instead.
+`binaries.py` prefers `magick` and explicitly refuses any `convert` resolving
+inside `System32`. On other platforms `convert` is still accepted as the
+ImageMagick v6 name.
+
+### Jobs and temp files
 
 Jobs live in an in-memory dict behind a lock — right-sized for a single-user
 local tool, and deliberately not durable. Each job gets its own directory under
@@ -197,95 +265,91 @@ local tool, and deliberately not durable. Each job gets its own directory under
 
 Because files outlive the process and the job store does not, `temp/` is swept
 on startup as well as every ten minutes; anything older than an hour goes.
-Restarting mid-job is safe: the job is gone, its files are cleaned up on the
-way back in, and nothing is left half-written.
+Restarting mid-job is safe: the job is gone, its files are cleaned up on the way
+back in, and nothing is left half-written.
 
-## Project layout
-
-```
-converter-app/
-  main.py                       FastAPI app and routes
-  registry.py                   conversion table, chaining, route lookup
-  detect.py                     content-based file type detection
-  binaries.py                   locating the five external tools
-  process_group.py              tying child processes to the server's lifetime
-  jobs.py                       job store and temp-file lifecycle
-  handlers/
-    base.py                     shared subprocess rules
-    imagemagick_handler.py
-    ffmpeg_handler.py
-    pandoc_handler.py
-    libreoffice_handler.py
-    calibre_handler.py
-  static/                       index.html, app.js, style.css
-  temp/                         uploads and outputs, swept hourly
-  run.ps1 / run.sh
-```
-
-`binaries.py` and `process_group.py` are the two modules not in the original
-spec's layout. Tool resolution needed a single home once both `/health` and the
-handlers had to agree on whether a tool exists; process supervision needed one
-once the answer turned out to be platform-specific.
-
-## What has been verified
-
-All 192 declared routes were run end to end through the live HTTP API — upload,
-detect, convert, poll, download — with the downloaded bytes checked against the
-expected magic number for each target format, four jobs at a time. 192/192
-pass, with nothing skipped.
-
-The HEIC sources needed a fixture none of the five tools can produce (they all
-read HEIC; none writes it). One was generated out-of-band with `pillow-heif`,
-which bundles a HEIF encoder:
+## Development
 
 ```bash
-pip install pillow pillow-heif     # test-time only, not an app dependency
-python -c "from PIL import Image; import pillow_heif; pillow_heif.register_heif_opener(); Image.new('RGB',(160,120),'blue').save('sample.heic', format='HEIF')"
+pip install -r requirements-dev.txt
+pytest              # run the suite
+ruff check .        # lint
 ```
 
-Also checked:
+The tests need no external tools — anything that shells out to one is skipped
+automatically when that tool is missing, so the suite is meaningful on a bare
+checkout and more thorough on a fully-equipped machine. Sample files are
+generated at runtime rather than committed.
 
-- Two-hop chains produce real output: `md → pdf` (via DOCX), `md → mobi` (via
-  EPUB), `docx → azw3`, `epub → odt`.
-- A text file renamed `.png` and one renamed `.mp4` are both identified as text
-  and never handed to ImageMagick or FFmpeg.
-- A corrupted PNG is rejected with ImageMagick's actual complaint, not a
-  deprecation warning that happened to be printed first.
-- An unsupported pair returns HTTP 400 listing what that source *can* become.
-- Uploads over the cap get HTTP 413, and the partial file is removed.
-- A conversion that exceeds its timeout is killed, the job is marked failed
-  with "Conversion timed out", and no orphaned process is left behind.
-- Server shutdown kills in-flight conversions; the job thread unwinds as a
-  failure rather than hanging.
-- **`taskkill /F` on the server mid-transcode leaves no orphan.** Verified by
-  starting a 25-second transcode, force-killing the server, and confirming the
-  ffmpeg process count went back to zero.
-- FFmpeg jobs report real progress — a 25-second transcode stepped
-  5 → 17 → 30 → 42 → 60 → 71 → 83 → 100%.
-- Restarting sweeps stale temp files (197 leftover entries removed on the way
-  up, `.gitkeep` preserved) and conversions work immediately afterwards.
-- Filenames with Windows-illegal characters, reserved device names (`con.png`),
-  path traversal (`../../escape.png`) and 300-character names all convert.
-- Five files dropped at once convert independently, and one failing does not
-  block the other four.
+```
+├── main.py                  FastAPI app and routes
+├── registry.py              conversion table, chaining, route lookup
+├── detect.py                content-based file type detection
+├── binaries.py              locating the five external tools
+├── process_group.py         tying child processes to the server's lifetime
+├── jobs.py                  job store and temp-file lifecycle
+├── handlers/
+│   ├── base.py              shared subprocess rules
+│   ├── imagemagick_handler.py
+│   ├── ffmpeg_handler.py
+│   ├── pandoc_handler.py
+│   ├── libreoffice_handler.py
+│   └── calibre_handler.py
+├── static/                  index.html, app.js, style.css
+├── tests/
+└── temp/                    uploads and outputs, swept hourly
+```
 
-## Limitations
+### Adding a conversion
 
-- **PDF is write-only.** Converting *to* PDF works from images, office
-  documents and ebooks. Converting *from* PDF is not offered: rasterising a PDF
-  needs Ghostscript, which is a separate install this app does not assume.
-- **HEIC is input-only.** ImageMagick reports HEIC as read-only (`r--`) via its
-  libheif delegate, so HEIC is offered as a source and never as a target. AVIF
-  goes through the same delegate and is read/write, so it works both ways.
-- **Pandoc cannot write PDF directly** without a LaTeX engine. Markdown to PDF
-  is routed through DOCX and LibreOffice instead, and if you ask Pandoc for a
-  PDF in a way that reaches it directly, the error explains that rather than
-  repeating Pandoc's `pdflatex not found`.
-- **Only FFmpeg reports real progress.** Video and audio jobs show a true
-  percentage, read from `ffmpeg -progress` against the duration `ffprobe`
-  reports. ImageMagick, Pandoc, LibreOffice and Calibre expose nothing
-  comparable, so their jobs show stage transitions and a moving bar rather than
-  a number that would be invented. The same fallback applies to a video whose
-  duration cannot be read — a stream-recorded WEBM, for instance, often carries
-  no duration in its header, and there is then nothing honest to divide by.
-- Chains are capped at two hops by design.
+Add the pair to the relevant list in `registry.py`. If an existing handler
+already covers the tool, that is the whole change:
+
+```python
+RASTER = ["png", "jpg", "webp", "bmp", "tiff", "gif", "avif"]
+```
+
+A new tool needs a module in `handlers/` following the contract above, plus an
+entry in `binaries.TOOLS` so `/health` can report on it.
+
+## Troubleshooting
+
+**A conversion fails with "not installed."** That tool is missing. The message
+names it and gives the install command; `/health` lists everything at once.
+
+**`did not find executable at '...\python.exe'`** when running anything in the
+virtualenv. A venv records an absolute path to the Python that created it, so
+moving or reinstalling that interpreter breaks it. Delete `.venv` and re-run the
+start script, or point `.venv/pyvenv.cfg` at the new location.
+
+**`Could not find platform independent libraries <prefix>`** before every
+command. The interpreter cannot find its own standard library at its install
+prefix — usually because `python.exe` was moved without the `Lib` folder beside
+it. Python may still run (it can locate the stdlib through the Windows
+registry) but `sys.prefix` is wrong, and any venv created from it will be too.
+Repair or reinstall Python so `Lib\`, `DLLs\` and `python.exe` sit in the same
+directory.
+
+**PDF only converts one way.** Converting *to* PDF works from images, office
+documents and ebooks. Converting *from* PDF is not offered: rasterising a PDF
+needs Ghostscript, which this app does not assume you have.
+
+**Progress sits at an indeterminate bar.** Only FFmpeg reports real progress,
+read from `ffmpeg -progress` against the duration `ffprobe` returns. The other
+four tools expose nothing comparable, so their jobs show stage transitions
+rather than a number that would be invented. The same applies to a video whose
+duration cannot be read — a stream-recorded WEBM often carries no duration in
+its header.
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `pytest` and `ruff check .`
+before opening a PR; CI runs both on Linux and Windows across Python 3.11–3.13.
+
+If you are adding a format, a test that proves the output is really that format
+(magic bytes, not just a non-empty file) is worth more than one that only checks
+the job succeeded.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

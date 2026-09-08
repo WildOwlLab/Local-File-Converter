@@ -1,0 +1,5 @@
+# Development and test dependencies. Runtime deps are in requirements.txt.
+-r requirements.txt
+
+pytest>=8.0
+httpx2>=2.0          # required by Starlette's TestClient

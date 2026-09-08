@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
             store.sweep()
+            jobs.pending.sweep()
             jobs.sweep_temp_dir()
 
     task = asyncio.create_task(sweeper())
@@ -196,22 +197,46 @@ def supported() -> dict:
 
 @app.post("/convert")
 async def convert(background: BackgroundTasks,
-                  file: UploadFile = File(...),
-                  target_format: str | None = Form(None)) -> JSONResponse:
-    filename = safe_filename(file.filename or "upload")
-    staging = jobs.TEMP_DIR / f"upload_{os.urandom(6).hex()}_{filename}"
+                  file: UploadFile | None = File(None),
+                  target_format: str | None = Form(None),
+                  upload_token: str | None = Form(None)) -> JSONResponse:
     jobs.TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    size = await save_upload(file, staging)
+
+    if upload_token:
+        # Second leg of the two-step flow: the bytes are already on disk from
+        # the identify request, so they are not sent again.
+        held = jobs.pending.take(upload_token)
+        if held is None or not held.path.exists():
+            raise HTTPException(status_code=409, detail={
+                "message": "That upload is no longer held; send the file again.",
+                "reason": "expired_token",
+            })
+        staging, filename, size = held.path, held.filename, held.size
+    elif file is not None:
+        filename = safe_filename(file.filename or "upload")
+        staging = jobs.TEMP_DIR / f"upload_{os.urandom(6).hex()}_{filename}"
+        size = await save_upload(file, staging)
+    else:
+        raise HTTPException(status_code=422,
+                            detail="Provide either a file or an upload_token.")
+
+    if size == 0:
+        staging.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail={
+            "message": "That file is empty, so there is nothing to convert.",
+            "detected_type": "empty file",
+        })
 
     info = detect(staging, filename)
     suggested = registry.targets_for(info.ext)
 
     # No target chosen yet: report what the file actually is and what it can
-    # become. The caller comes back with a second request to start the job.
+    # become, and hold the bytes under a token for the follow-up request.
     if not target_format:
-        staging.unlink(missing_ok=True)
+        held = jobs.pending.add(staging, filename, size)
         return JSONResponse({
             "job_id": None,
+            "upload_token": held.token,
             "filename": filename,
             "size_bytes": size,
             "detected_type": info.description,

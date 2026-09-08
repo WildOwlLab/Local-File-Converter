@@ -1,0 +1,15 @@
+line-length = 90
+target-version = "py311"
+
+exclude = [".venv", "temp"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # long lines are caught by line-length, not worth failing on
+    "B008",   # FastAPI's Depends()/File() defaults are the documented style
+]
+
+[lint.per-file-ignores]
+# Tests import fixtures from conftest, which ruff reads as a local module.
+"tests/*" = ["E402"]

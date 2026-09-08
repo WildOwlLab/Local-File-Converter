@@ -12,6 +12,7 @@ import sys
 from dataclasses import dataclass
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
 # Extra places to look when a tool installs itself without putting the binary
 # on PATH, which is the norm for the Windows installers of these projects.
@@ -42,31 +43,59 @@ _WINDOWS_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+# macOS app bundles keep their command-line tools inside the .app, and the
+# installers do not add them to PATH.
+_MACOS_HINTS: dict[str, tuple[str, ...]] = {
+    "soffice": (
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ),
+    "ebook-convert": (
+        "/Applications/calibre.app/Contents/MacOS/ebook-convert",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class Tool:
     key: str            # internal name used by handlers, e.g. "imagemagick"
     display: str        # human name for the UI
     commands: tuple[str, ...]  # candidate executables, in preference order
     handles: str        # what breaks without it, for the missing-tool banner
-    install_hint: str
+    hints: tuple[str, str, str]  # install command: windows, macos, linux
+
+    @property
+    def install_hint(self) -> str:
+        """The install command for the platform actually running this."""
+        windows, macos, linux = self.hints
+        return windows if IS_WINDOWS else macos if IS_MACOS else linux
 
 
 TOOLS: tuple[Tool, ...] = (
     Tool("imagemagick", "ImageMagick", ("magick", "convert"),
          "image conversions (png, jpg, webp, bmp, tiff)",
-         "winget install ImageMagick.ImageMagick"),
+         ("winget install ImageMagick.ImageMagick",
+          "brew install imagemagick",
+          "sudo apt install imagemagick")),
     Tool("ffmpeg", "FFmpeg", ("ffmpeg",),
          "video and audio conversions (mp4, mov, webm, mp3, wav, gif)",
-         "winget install Gyan.FFmpeg"),
+         ("winget install Gyan.FFmpeg",
+          "brew install ffmpeg",
+          "sudo apt install ffmpeg")),
     Tool("pandoc", "Pandoc", ("pandoc",),
          "markup conversions (md, html, docx, epub)",
-         "winget install JohnMacFarlane.Pandoc"),
+         ("winget install JohnMacFarlane.Pandoc",
+          "brew install pandoc",
+          "sudo apt install pandoc")),
     Tool("libreoffice", "LibreOffice", ("soffice",),
          "office document conversions (docx, xlsx, pptx, odt, pdf)",
-         "winget install TheDocumentFoundation.LibreOffice"),
+         ("winget install TheDocumentFoundation.LibreOffice",
+          "brew install --cask libreoffice",
+          "sudo apt install libreoffice")),
     Tool("calibre", "Calibre", ("ebook-convert",),
          "ebook conversions (epub, mobi, azw3)",
-         "winget install calibre.calibre"),
+         ("winget install calibre.calibre",
+          "brew install --cask calibre",
+          "sudo apt install calibre")),
 )
 
 TOOLS_BY_KEY = {t.key: t for t in TOOLS}
@@ -88,13 +117,14 @@ def resolve(key: str) -> str | None:
         found = shutil.which(command)
         if found and not _is_windows_convert_trap(found, command):
             return found
-    if IS_WINDOWS:
-        for pattern in _WINDOWS_HINTS.get(tool.commands[0], ()):
-            # Newest match last alphabetically is the best guess for versioned
-            # install directories (ImageMagick-7.1.2-29 beats -7.1.1-0).
-            matches = sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
-            if matches:
-                return matches[-1]
+    hints = (_WINDOWS_HINTS if IS_WINDOWS
+             else _MACOS_HINTS if IS_MACOS else {})
+    for pattern in hints.get(tool.commands[0], ()):
+        # Newest match last alphabetically is the best guess for versioned
+        # install directories (ImageMagick-7.1.2-29 beats -7.1.1-0).
+        matches = sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
+        if matches:
+            return matches[-1]
     return None
 
 

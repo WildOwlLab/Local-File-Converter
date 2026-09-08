@@ -1,0 +1,15 @@
+# Normalise to LF in the repository. A CRLF run.sh is not executable on Linux.
+* text=auto eol=lf
+
+# PowerShell and batch files want CRLF in the working copy on Windows.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binary content.
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.ico binary

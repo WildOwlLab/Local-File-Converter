@@ -17,6 +17,7 @@ Both platforms can be told to do the cleanup for us:
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -156,18 +157,14 @@ def adopt(proc: subprocess.Popen) -> bool:
 def kill_tree(proc: subprocess.Popen) -> None:
     """Kill a child and, on POSIX, anything it spawned alongside it."""
     if IS_WINDOWS:
-        try:
+        with contextlib.suppress(OSError):
             proc.kill()
-        except OSError:
-            pass
         return
     try:
         os.killpg(os.getpgid(proc.pid), 9)
     except (OSError, ProcessLookupError):
-        try:
+        with contextlib.suppress(OSError):
             proc.kill()
-        except OSError:
-            pass
 
 
 def status() -> str:
