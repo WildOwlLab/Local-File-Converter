@@ -40,6 +40,13 @@ server runs, and again at startup. They are deleted, not shredded: the bytes are
 unlinked rather than overwritten, so disk-recovery tooling could still find them.
 If that matters, put the checkout on an encrypted volume.
 
+## Half-installed tools
+
+`/health` distinguishes a tool that is absent from one that is present but
+cannot work. This matters for LibreOffice, which installs a module at a time:
+with `libreoffice-core` alone, `soffice` exists and every conversion exits 0
+having written nothing. Reporting only the binary would advertise it as working.
+
 ## What it does not defend against
 
 - **The conversion tools themselves.** FFmpeg, ImageMagick, Pandoc, LibreOffice

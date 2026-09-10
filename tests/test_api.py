@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import time
 
 import pytest
 from conftest import FACTORIES
@@ -18,10 +19,11 @@ def identify(client, upload_tuple):
 
 def test_health_reports_tools_and_the_cap(client):
     body = client.get("/health").json()
-    assert set(body) == {"ok", "tools", "missing", "max_upload_mb"}
+    assert set(body) == {"ok", "tools", "missing", "unusable", "max_upload_mb"}
     assert body["max_upload_mb"] == main.MAX_UPLOAD_MB
     assert isinstance(body["missing"], list)
-    assert body["ok"] == (not body["missing"])
+    assert isinstance(body["unusable"], list)
+    assert body["ok"] == (not body["missing"] and not body["unusable"])
 
 
 def test_health_lists_all_five_tools(client):
@@ -233,3 +235,51 @@ def test_a_hostile_filename_survives_a_round_trip(client):
     assert response.status_code == 200
     assert "/" not in response.json()["filename"]
     assert response.json()["filename"].startswith("file_")
+
+
+# ------------------------------- a tool that is installed but cannot do the job
+
+def test_health_surfaces_a_half_installed_tool(client, monkeypatch):
+    """LibreOffice without its document modules used to report as working."""
+    import binaries
+    monkeypatch.setattr(binaries, "resolve",
+                        lambda key: "/usr/bin/soffice" if key == "libreoffice" else None)
+    monkeypatch.setattr(binaries, "libreoffice_modules", frozenset)
+
+    body = client.get("/health").json()
+    entry = body["tools"]["libreoffice"]
+    assert entry["present"] is True
+    assert entry["usable"] is False
+    assert "document modules" in entry["problem"]
+
+    assert "LibreOffice" not in body["missing"]          # it *is* installed
+    assert [u["display"] for u in body["unusable"]] == ["LibreOffice"]
+    assert body["ok"] is False
+
+
+def test_a_conversion_needing_a_missing_module_is_refused_by_name(
+        client, upload, monkeypatch):
+    """The whole point: fail with the reason instead of running LibreOffice and
+    reporting that it produced nothing."""
+    import binaries
+    monkeypatch.setattr(binaries, "IS_WINDOWS", False)
+    monkeypatch.setattr(binaries, "IS_MACOS", False)
+    monkeypatch.setattr(binaries, "libreoffice_modules",
+                        lambda: frozenset({"Writer", "Impress"}))   # no Calc
+
+    started = client.post("/convert", files={"file": upload("csv")},
+                          data={"target_format": "ods"}).json()
+    if started.get("job_id") is None:
+        pytest.skip("csv->ods is not routable in this configuration")
+
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        body = client.get(f"/status/{started['job_id']}").json()
+        if body["status"] in ("done", "failed"):
+            break
+        time.sleep(0.05)
+
+    assert body["status"] == "failed"
+    assert "Calc" in body["error"]
+    assert "CSV" in body["error"]
+    assert "libreoffice-calc" in body["error"]

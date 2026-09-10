@@ -21,9 +21,101 @@ def test_tools_by_key_matches_tools():
 def test_health_reports_every_tool():
     report = binaries.health()
     assert set(report) == {t.key for t in binaries.TOOLS}
+    required = {"display", "present", "usable", "problem", "path", "handles",
+                "install_hint"}
     for entry in report.values():
-        assert set(entry) == {"display", "present", "path", "handles", "install_hint"}
+        assert required <= set(entry)
         assert isinstance(entry["present"], bool)
+        assert isinstance(entry["usable"], bool)
+        # A tool cannot be usable without being present.
+        assert not (entry["usable"] and not entry["present"])
+        # And an unusable one must say why, or the report is not actionable.
+        assert entry["usable"] or entry["problem"] or not entry["present"]
+
+
+# ------------------------------------------- a tool present but half-installed
+
+def test_libreoffice_without_modules_is_reported_unusable(monkeypatch):
+    """`libreoffice-core` installs soffice and nothing that can open a
+    document. Every conversion then exits 0 having written nothing, so
+    reporting the binary as present was reporting it as working."""
+    monkeypatch.setattr(binaries, "resolve", lambda key: "/usr/bin/soffice")
+    monkeypatch.setattr(binaries, "libreoffice_modules", frozenset)
+
+    reason = binaries.unusable_reason("libreoffice")
+    assert reason and "without any document modules" in reason
+    assert "libreoffice-writer" in reason      # names the fix
+
+
+def test_libreoffice_with_modules_is_usable(monkeypatch):
+    monkeypatch.setattr(binaries, "resolve", lambda key: "/usr/bin/soffice")
+    monkeypatch.setattr(binaries, "libreoffice_modules",
+                        lambda: frozenset({"Writer", "Calc", "Impress"}))
+    assert binaries.unusable_reason("libreoffice") is None
+
+
+def test_an_absent_libreoffice_is_missing_not_unusable(monkeypatch):
+    """Two different problems with two different fixes."""
+    monkeypatch.setattr(binaries, "resolve", lambda key: None)
+    assert binaries.unusable_reason("libreoffice") is None
+
+
+@pytest.mark.parametrize("key", ["imagemagick", "ffmpeg", "pandoc", "calibre"])
+def test_single_binary_tools_are_never_reported_half_installed(key):
+    """The other four are one executable: present or absent, nothing between."""
+    assert binaries.unusable_reason(key) is None
+
+
+def test_require_refuses_a_present_but_unusable_tool(monkeypatch):
+    """Otherwise the failure surfaces as a conversion that produced nothing."""
+    monkeypatch.setattr(binaries, "resolve", lambda key: "/usr/bin/soffice")
+    monkeypatch.setattr(binaries, "libreoffice_modules", frozenset)
+    with pytest.raises(FileNotFoundError, match="document modules"):
+        binaries.require("libreoffice")
+
+
+@pytest.mark.parametrize("ext,module,package", [
+    ("xlsx", "Calc", "libreoffice-calc"),
+    ("csv", "Calc", "libreoffice-calc"),
+    ("docx", "Writer", "libreoffice-writer"),
+    ("odt", "Writer", "libreoffice-writer"),
+    ("pptx", "Impress", "libreoffice-impress"),
+])
+def test_a_missing_module_names_the_format_and_the_package(
+        monkeypatch, ext, module, package):
+    """Installed-but-without-Calc should say so, not fail generically."""
+    monkeypatch.setattr(binaries, "IS_WINDOWS", False)
+    monkeypatch.setattr(binaries, "IS_MACOS", False)
+    monkeypatch.setattr(binaries, "libreoffice_modules",
+                        lambda: frozenset({"Writer", "Calc", "Impress"}) - {module})
+    reason = binaries.missing_module_reason(ext)
+    assert reason and module in reason and ext.upper() in reason
+    assert package in reason
+
+
+def test_a_present_module_blocks_nothing(monkeypatch):
+    monkeypatch.setattr(binaries, "libreoffice_modules",
+                        lambda: frozenset({"Writer", "Calc", "Impress"}))
+    assert binaries.missing_module_reason("xlsx") is None
+
+
+def test_a_format_libreoffice_never_handles_is_not_blocked(monkeypatch):
+    monkeypatch.setattr(binaries, "libreoffice_modules", frozenset)
+    assert binaries.missing_module_reason("png") is None
+
+
+def test_module_detection_reads_the_directory_beside_soffice(tmp_path, monkeypatch):
+    """A directory listing, not a subprocess: cheap enough for a health check
+    and it notices a module installed while the server is running."""
+    program = tmp_path / "program"
+    program.mkdir()
+    (program / "soffice").write_bytes(b"")
+    (program / "libswlo.so").write_bytes(b"")     # Writer only
+    monkeypatch.setattr(binaries, "resolve", lambda key: str(program / "soffice"))
+    assert binaries.libreoffice_modules() == frozenset({"Writer"})
+
+    (program / "sclo.dll").write_bytes(b"")       # the Windows name for Calc
+    assert binaries.libreoffice_modules() == frozenset({"Writer", "Calc"})
 
 
 def test_missing_tool_message_names_the_tool_and_the_fix(monkeypatch):

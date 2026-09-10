@@ -81,10 +81,23 @@ async function loadHealth() {
   try {
     const response = await fetch('/health');
     const health = await response.json();
+    const notes = [];
     if (health.missing && health.missing.length) {
-      ui.banner.textContent =
-        `Not installed: ${health.missing.join(', ')}. `
-        + 'Conversions needing those tools will be refused; everything else works.';
+      notes.push(`Not installed: ${health.missing.join(', ')}.`);
+    }
+    // A tool can be present and still convert nothing -- LibreOffice installed
+    // without Writer or Calc, for instance. Saying only "not installed" would
+    // report that one as working.
+    for (const tool of health.unusable || []) {
+      // The problem text already names the tool, so prefixing it with the
+      // display name reads as "LibreOffice: LibreOffice is installed ...".
+      notes.push(tool.problem.startsWith(tool.display)
+        ? tool.problem
+        : `${tool.display}: ${tool.problem}`);
+    }
+    if (notes.length) {
+      notes.push('Conversions needing those tools will be refused; everything else works.');
+      ui.banner.textContent = notes.join(' ');
       show(ui.banner, true);
     }
   } catch {

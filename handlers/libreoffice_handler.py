@@ -48,7 +48,15 @@ def _seal_profile(profile: Path) -> None:
 def convert_office(src: Path, dst: Path,
                    on_progress: Callable[[float], None] | None = None) -> None:
     binary = binaries.require("libreoffice")
+    source_ext = src.suffix.lower().lstrip(".")
     target = dst.suffix.lower().lstrip(".")
+
+    # LibreOffice can be installed a module at a time. Without the right one it
+    # exits 0 having written nothing, so the check happens here rather than
+    # letting ensure_output report an empty result with no idea why.
+    blocked = binaries.missing_module_reason(source_ext)
+    if blocked is not None:
+        raise FileNotFoundError(blocked)
 
     # LibreOffice cannot be told what to call its output. It writes
     # <input-stem>.<ext> into --outdir and that is the end of the negotiation,
