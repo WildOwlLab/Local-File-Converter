@@ -262,6 +262,9 @@ def test_a_conversion_needing_a_missing_module_is_refused_by_name(
     """The whole point: fail with the reason instead of running LibreOffice and
     reporting that it produced nothing."""
     import binaries
+    if binaries.resolve("libreoffice") is None:
+        pytest.skip("LibreOffice is absent, so 'installed but incomplete' "
+                    "cannot arise -- the not-installed message is correct there")
     monkeypatch.setattr(binaries, "IS_WINDOWS", False)
     monkeypatch.setattr(binaries, "IS_MACOS", False)
     monkeypatch.setattr(binaries, "libreoffice_modules",

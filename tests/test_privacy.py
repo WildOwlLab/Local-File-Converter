@@ -260,6 +260,10 @@ def test_every_libreoffice_conversion_seals_its_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(libreoffice_handler, "run",
                         lambda *a, **k: (1, "", "stopped before running"))
     monkeypatch.setattr(libreoffice_handler.binaries, "require", lambda key: "soffice")
+    # Present a complete install: this test is about the profile seal, and the
+    # module check would otherwise refuse first on a machine without Calc.
+    monkeypatch.setattr(libreoffice_handler.binaries,
+                        "missing_module_reason", lambda ext: None)
 
     source = tmp_path / "in.csv"
     source.write_text("a,b\n1,2\n")
