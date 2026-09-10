@@ -54,10 +54,15 @@ async def lifespan(app: FastAPI):
     swept = jobs.sweep_temp_dir()
     if swept:
         print(f"[startup] removed {swept} stale temp item(s)")
-    missing = [t["display"] for t in binaries.health().values() if not t["present"]]
+    report = binaries.health()
+    missing = [t["display"] for t in report.values() if not t["present"]]
     if missing:
         print(f"[startup] tools not found: {', '.join(missing)} "
               f"(conversions needing them will be rejected with an explanation)")
+    for tool in report.values():
+        if tool["present"] and not tool["usable"]:
+            print(f"[startup] {tool['display']} is installed but not usable: "
+                  f"{tool['problem']}")
     print(f"[startup] {process_group.status()}")
     exposed = exposed_bind_address()
     if exposed:
@@ -200,12 +205,24 @@ async def save_upload(upload: UploadFile, destination: Path) -> int:
 
 @app.get("/health")
 def health() -> dict:
+    """What is installed, and what of that can actually convert something.
+
+    "missing" and "unusable" are separate because they are separate problems:
+    a tool that is absent needs installing, while a tool that is present but
+    half-installed reports itself as working right up until every conversion
+    produces nothing.
+    """
     report = binaries.health()
     missing = [t["display"] for t in report.values() if not t["present"]]
+    unusable = [
+        {"display": t["display"], "problem": t["problem"]}
+        for t in report.values() if t["present"] and not t["usable"]
+    ]
     return {
-        "ok": not missing,
+        "ok": not missing and not unusable,
         "tools": report,
         "missing": missing,
+        "unusable": unusable,
         "max_upload_mb": MAX_UPLOAD_MB,
     }
 

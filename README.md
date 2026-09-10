@@ -181,6 +181,15 @@ crashes when a tool is absent — conversions that need it are refused with an
 explanation and an install command, and everything else keeps working. Install
 only the ones you need.
 
+"Installed" and "able to convert something" are checked separately, because
+LibreOffice can be half-installed in a way the binary does not reveal.
+`libreoffice-core` on its own provides `soffice` and nothing that can open a
+document: every conversion then exits 0 having written nothing. `/health`
+reports `present` and `usable` as different fields, lists which LibreOffice
+modules it found, and a conversion needing a module you do not have is refused
+by name — "LibreOffice is installed but without Calc, which is what opens XLSX
+files" — rather than failing as an empty result.
+
 | Tool | Handles | Windows | macOS | Debian / Ubuntu |
 |---|---|---|---|---|
 | ImageMagick | images | `winget install ImageMagick.ImageMagick` | `brew install imagemagick` | `sudo apt install imagemagick` |
@@ -241,7 +250,7 @@ Port is a script argument: `.\run.ps1 -Port 9000` or `./run.sh 9000`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | Which tools are installed, which are missing, and the upload cap |
+| `GET /health` | Which tools are installed, which are missing, which are installed but cannot work, and the upload cap |
 | `GET /supported` | The full conversion matrix, split into direct and two-step routes |
 | `POST /convert` | Multipart `file`, optional `target_format`, optional `upload_token` |
 | `GET /status/{job_id}` | `queued` / `running` / `done` / `failed`, plus progress and error text |
