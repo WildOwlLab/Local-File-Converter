@@ -130,6 +130,37 @@ def _details(stdout: str, stderr: str) -> str:
 
 # --------------------------------------------------- running the tool itself
 
+# Local conversion is supposed to mean local, and two of these tools break that
+# on their own initiative: given an HTML or EPUB file containing
+# <img src="http://...">, Pandoc and LibreOffice both fetch it. A tracking pixel
+# in a document would therefore phone home the moment you converted it, telling
+# the other end your IP address, that you have the document, and when you opened
+# it. Nothing is uploaded, but something certainly leaves.
+#
+# Pointing every proxy variable at a closed port makes any HTTP attempt fail
+# instantly. Both tools then finish the conversion without the remote resource
+# instead of failing, which is the behaviour a local tool should have had all
+# along. This is a backstop, not a sandbox: it cannot stop a program that
+# ignores proxy settings and opens a socket directly. tests/test_privacy.py
+# checks the tools we actually ship against a real listener.
+_BLACKHOLE = "http://127.0.0.1:1"
+NO_NETWORK_ENV: dict[str, str] = {
+    "http_proxy": _BLACKHOLE, "HTTP_PROXY": _BLACKHOLE,
+    "https_proxy": _BLACKHOLE, "HTTPS_PROXY": _BLACKHOLE,
+    "ftp_proxy": _BLACKHOLE, "FTP_PROXY": _BLACKHOLE,
+    "all_proxy": _BLACKHOLE, "ALL_PROXY": _BLACKHOLE,
+    # Empty, so nothing is exempted from the above.
+    "no_proxy": "", "NO_PROXY": "",
+}
+
+
+def child_env() -> dict[str, str]:
+    """The environment every conversion subprocess runs in."""
+    env = dict(os.environ)
+    env.update(NO_NETWORK_ENV)
+    return env
+
+
 # Children currently running, so a shutdown can take them down with it.
 _live: set[subprocess.Popen] = set()
 _live_lock = threading.Lock()
@@ -184,6 +215,7 @@ def run(tool_key: str,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             cwd=str(cwd) if cwd else None,
+            env=child_env(),
             **process_group.spawn_kwargs(),
         )
     except OSError as exc:

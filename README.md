@@ -14,8 +14,52 @@ slides and ebooks.
 
 ---
 
+## Privacy
+
+This is the whole point of the app, so it is stated precisely and tested rather
+than promised.
+
+**What is guaranteed, and checked by `tests/test_privacy.py`:**
+
+- **The server is only reachable from this machine.** It binds `127.0.0.1`.
+  Uvicorn's own default is loopback, and the start scripts pin it explicitly. If
+  it ever starts on a non-loopback address it says so, loudly, at startup.
+- **The app has no way to reach the internet.** No module in it imports an HTTP
+  client. There is no telemetry, no analytics, no update check, no crash
+  reporting, and no "anonymous usage statistics."
+- **The page loads nothing from the internet.** No CDN, no web fonts, no
+  scripts, no tracking pixel. Every request it makes is a relative path back to
+  your own server. Open your browser's network tab and watch.
+- **Conversion tools are denied the network too.** Pandoc and LibreOffice will
+  fetch remote resources that an input file points at, given the chance -- an
+  `<img src="http://...">` inside an HTML or EPUB file is enough. A tracking
+  pixel in a document you were sent would report your IP address and the moment
+  you opened it. Every conversion runs with proxy settings aimed at a closed
+  port so those attempts fail instantly, and the conversion completes without
+  the remote resource. There is a test that converts exactly such a document
+  against a local listener and fails if anything is requested.
+- **Files do not linger.** Uploads and results live under `temp/`, are deleted
+  with their job an hour after it finishes, and are swept on every startup.
+
+**What is not claimed:**
+
+- The five conversion tools are large third-party programs. The proxy backstop
+  demonstrably stops the ones shipped here, but it is a backstop, not a sandbox:
+  it cannot stop a program that ignores proxy settings and opens a socket
+  itself. If that matters for a particular file, disconnect the network.
+- Your files are written to disk under `temp/` while a job runs. Anyone else
+  with read access to that folder can read them during that window.
+- Binding to `0.0.0.0`, or putting the app behind a tunnel, hands anyone who can
+  reach it the ability to upload files and run these tools on your machine.
+  There is no authentication. Do not do it.
+
+See [SECURITY.md](SECURITY.md) for the full threat model.
+
+---
+
 ## Contents
 
+- [Privacy](#privacy)
 - [Quick start](#quick-start)
 - [Installing the conversion tools](#installing-the-conversion-tools)
 - [Supported conversions](#supported-conversions)
@@ -304,30 +348,33 @@ checkout and more thorough on a fully-equipped machine. Sample files are
 generated at runtime rather than committed.
 
 ```
-├── main.py                  FastAPI app and routes
+├── main.py                  FastAPI app, routes, job runner
 ├── registry.py              conversion table, chaining, route lookup
 ├── detect.py                content-based file type detection
 ├── binaries.py              locating the five external tools
 ├── process_group.py         tying child processes to the server's lifetime
 ├── jobs.py                  job store and temp-file lifecycle
 ├── handlers/
-│   ├── base.py              shared subprocess rules
+│   ├── base.py              shared subprocess rules, and the network backstop
 │   ├── imagemagick_handler.py
 │   ├── ffmpeg_handler.py
 │   ├── pandoc_handler.py
 │   ├── libreoffice_handler.py
 │   └── calibre_handler.py
-├── static/                  index.html, app.js, style.css
+├── static/                  index.html, app.js, style.css -- no build step
 ├── tests/
 │   ├── conftest.py          fixtures, generated at runtime
 │   ├── test_detect.py       signatures, and the weak ones in particular
 │   ├── test_registry.py     routes, duplicates, chain planning
 │   ├── test_handlers.py     the subprocess contract
 │   ├── test_process_group.py  children dying with the server
+│   ├── test_privacy.py      the claims in the Privacy section, enforced
 │   ├── test_conversions.py  real conversions, skipped when a tool is absent
 │   ├── test_api.py          the HTTP surface
 │   └── test_matrix.py       every route (opt in with `-m matrix`)
+├── run.bat / run.ps1 / run.sh   start scripts
 ├── .github/workflows/ci.yml
+├── SECURITY.md              threat model
 └── temp/                    uploads and outputs, swept hourly
 ```
 
