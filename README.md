@@ -32,8 +32,8 @@ slides and ebooks.
 ## Quick start
 
 ```bash
-git clone https://github.com/at14995/local-file-converter.git
-cd local-file-converter
+git clone https://github.com/0xphoenixlabs/Local-File-Converter.git
+cd Local-File-Converter
 ```
 
 **Windows**
@@ -272,7 +272,8 @@ back in, and nothing is left half-written.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest              # run the suite
+pytest              # the default suite
+pytest -m matrix    # every route, for real -- minutes, needs all five tools
 ruff check .        # lint
 ```
 
@@ -297,6 +298,15 @@ generated at runtime rather than committed.
 │   └── calibre_handler.py
 ├── static/                  index.html, app.js, style.css
 ├── tests/
+│   ├── conftest.py          fixtures, generated at runtime
+│   ├── test_detect.py       signatures, and the weak ones in particular
+│   ├── test_registry.py     routes, duplicates, chain planning
+│   ├── test_handlers.py     the subprocess contract
+│   ├── test_process_group.py  children dying with the server
+│   ├── test_conversions.py  real conversions, skipped when a tool is absent
+│   ├── test_api.py          the HTTP surface
+│   └── test_matrix.py       every route (opt in with `-m matrix`)
+├── .github/workflows/ci.yml
 └── temp/                    uploads and outputs, swept hourly
 ```
 
@@ -314,6 +324,19 @@ entry in `binaries.TOOLS` so `/health` can report on it.
 
 ## Troubleshooting
 
+**The start script printed a link, but the browser will not open it.** The
+server exited immediately after the script printed the URL. Run the script from
+a terminal rather than by double-clicking it, so the window stays open and the
+error above the link is readable.
+
+The usual cause is an incomplete copy of the project. A ZIP downloaded from a
+branch that has no `handlers/` or `static/` directory still looks complete,
+because every top-level file is there, and the app then fails to import. Both
+start scripts check for this before anything else and name the missing folder.
+`git clone` gets you the whole repository; GitHub's "Download ZIP" button gives
+you whichever branch you happen to be looking at, which is not necessarily the
+one you want.
+
 **A conversion fails with "not installed."** That tool is missing. The message
 names it and gives the install command; `/health` lists everything at once.
 
@@ -329,6 +352,17 @@ it. Python may still run (it can locate the stdlib through the Windows
 registry) but `sys.prefix` is wrong, and any venv created from it will be too.
 Repair or reinstall Python so `Lib\`, `DLLs\` and `python.exe` sit in the same
 directory.
+
+**A conversion produced the wrong format, or refuses a format the table
+lists.** ImageMagick reads and writes most formats through optional delegate
+libraries, and which ones are compiled in is decided by whoever packaged your
+build. Debian and Ubuntu's ImageMagick 6, for example, ships AVIF and HEIC as
+read-only. Asked to write a format it has no encoder for, ImageMagick prints a
+*warning*, exits 0, and writes the image in some other format -- so you get a
+valid, non-empty file that is not what you asked for. The handler treats that
+warning as a failure rather than handing back a mislabelled file. Run
+`magick -list format` (or `convert -list format` on v6) to see what your build
+can actually write; the `rw-` column is the one that matters.
 
 **PDF only converts one way.** Converting *to* PDF works from images, office
 documents and ebooks. Converting *from* PDF is not offered: rasterising a PDF
