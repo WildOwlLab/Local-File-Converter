@@ -1,9 +1,19 @@
 name: CI
 
 on:
+  # Only main on push. With "**" here, every branch that also has a pull
+  # request open runs the whole matrix twice for one commit -- once for the
+  # push, once for the PR -- which doubles the bill and the checks list for
+  # no extra signal.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+# A new push supersedes whatever was still running for the same ref. Nobody
+# reads the results of a run that a later commit has already invalidated.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
