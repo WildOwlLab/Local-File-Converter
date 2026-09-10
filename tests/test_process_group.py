@@ -35,7 +35,15 @@ def alive(pid: int) -> bool:
 
 
 def spawn(command: str) -> subprocess.Popen:
+    """A shell child. POSIX only -- the tests using it need process groups."""
     return subprocess.Popen(["/bin/sh", "-c", command],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            **process_group.spawn_kwargs())
+
+
+def spawn_python(code: str) -> subprocess.Popen:
+    """A child that exists on every platform. /bin/sh does not."""
+    return subprocess.Popen([sys.executable, "-c", code],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             **process_group.spawn_kwargs())
 
@@ -103,7 +111,7 @@ def test_terminate_all_with_nothing_running_is_zero():
 
 
 def test_kill_tree_on_an_already_dead_child_is_harmless():
-    proc = spawn("true")
+    proc = spawn_python("pass")
     proc.wait(timeout=10)
     process_group.kill_tree(proc)   # must not raise
 
@@ -111,7 +119,7 @@ def test_kill_tree_on_an_already_dead_child_is_harmless():
 @POSIX_ONLY
 def test_adopt_is_a_no_op_off_windows():
     """The job object is the Windows mechanism; POSIX gets process groups."""
-    proc = spawn("true")
+    proc = spawn_python("pass")
     try:
         assert process_group.adopt(proc) is False
     finally:

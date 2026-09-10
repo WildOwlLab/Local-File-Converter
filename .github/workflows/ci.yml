@@ -52,7 +52,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             imagemagick ffmpeg pandoc calibre \
-            libreoffice-writer libreoffice-calc libreoffice-impress
+            libreoffice-writer libreoffice-calc libreoffice-impress \
+            librsvg2-bin
+          # librsvg2-bin is not optional trivia: ImageMagick renders SVG by
+          # shelling out to rsvg-convert, and --no-install-recommends drops it.
+          # Without it every SVG route is skipped and the sweep quietly proves
+          # less than it appears to.
 
       - name: Install dependencies
         run: |

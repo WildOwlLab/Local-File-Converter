@@ -164,12 +164,16 @@ def test_timeout_kills_the_child():
 
     assert len(started) == 1
     proc = started[0]
-    # wait() in the timeout path reaps it, so returncode is already set.
+    # wait() in the timeout path reaps it, so returncode is already set. This
+    # is the assertion that matters, and it holds on every platform.
     assert proc.returncode is not None
-    # And the OS agrees it is gone, rather than a zombie we merely stopped
-    # waiting on.
-    with pytest.raises(OSError):
-        os.kill(proc.pid, 0)
+
+    # Confirming with the OS that the pid is really gone, rather than a zombie
+    # we merely stopped waiting on, is POSIX-specific: Windows keeps the handle
+    # open for a reaped process, so os.kill(pid, 0) there proves nothing.
+    if sys.platform != "win32":
+        with pytest.raises(OSError):
+            os.kill(proc.pid, 0)
 
 
 def test_a_timed_out_run_leaves_nothing_registered():

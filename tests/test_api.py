@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-import pathlib
 
 import pytest
 from conftest import FACTORIES
@@ -183,11 +182,16 @@ def test_safe_filename_defuses_paths_and_illegal_characters(raw, expected):
     "....//....//escape.png",
     "sub/dir/file.png",
 ])
-def test_no_sanitised_name_can_escape_its_directory(raw):
+def test_no_sanitised_name_can_escape_its_directory(raw, tmp_path):
     """The exact output differs by platform -- on POSIX a backslash is a legal
     filename character, so it is replaced rather than treated as a separator --
     but the property that matters holds everywhere: what comes back is a single
-    path component that cannot climb out of the job directory."""
+    path component that cannot climb out of the job directory.
+
+    The job directory is a real one from tmp_path rather than a hardcoded
+    "/jobs/abc", which resolves to D:\\jobs\\abc on a Windows runner and made
+    this assertion fail for a reason that had nothing to do with the property
+    being tested."""
     from pathlib import PurePosixPath, PureWindowsPath
 
     cleaned = main.safe_filename(raw)
@@ -196,8 +200,12 @@ def test_no_sanitised_name_can_escape_its_directory(raw):
     assert PurePosixPath(cleaned).name == cleaned
     assert PureWindowsPath(cleaned).name == cleaned
     assert not cleaned.startswith(".")
-    resolved = (pathlib.Path("/jobs/abc") / cleaned).resolve()
-    assert str(resolved).startswith("/jobs/abc")
+
+    job_dir = (tmp_path / "jobs" / "abc").resolve()
+    job_dir.mkdir(parents=True, exist_ok=True)
+    resolved = (job_dir / cleaned).resolve()
+    assert resolved.parent == job_dir
+    assert job_dir in resolved.parents
 
 
 @pytest.mark.parametrize("raw", ["con.png", "CON.png", "nul.txt", "com1.jpg", "lpt9.bmp"])

@@ -8,6 +8,7 @@ happily on a file that is not the format it claims to be.
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -57,7 +58,17 @@ def test_bmp_to_png(sample, tmp_path):
 
 @requires("imagemagick")
 def test_svg_rasterises(sample, tmp_path):
-    assert_is(convert(sample("svg"), "png", tmp_path), "png")
+    """ImageMagick renders SVG through an external delegate (rsvg-convert or
+    Inkscape). A build without one cannot do this at all, which is an
+    environment limit rather than a broken route -- and the handler failing
+    loudly here is the correct behaviour, so the skip is on the test."""
+    try:
+        result = convert(sample("svg"), "png", tmp_path)
+    except ConversionError as exc:
+        if "delegate" in (exc.summary + exc.details).lower():
+            pytest.skip("this ImageMagick build has no SVG delegate installed")
+        raise
+    assert_is(result, "png")
 
 
 @requires("imagemagick")
@@ -368,8 +379,12 @@ def test_a_timeout_fails_the_job_cleanly(client, upload, monkeypatch):
 
     def slow(src, dst, on_progress=None):
         from handlers import base
+        # sys.executable, not /bin/sh: the point is a child that outlives its
+        # timeout, and a shell that does not exist on Windows fails for the
+        # wrong reason.
         base.run("imagemagick",
-                 ["/bin/sh", "-c", "sleep 30"], timeout=base.timeout_for("imagemagick"))
+                 [sys.executable, "-c", "import time; time.sleep(30)"],
+                 timeout=base.timeout_for("imagemagick"))
 
     monkeypatch.setitem(registry.ROUTE_MAP, ("png", "webp"),
                         registry.Route("png", "webp", "imagemagick", slow))

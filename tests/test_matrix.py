@@ -19,6 +19,7 @@ from conftest import FACTORIES, TEXT_SAMPLES
 import binaries
 import registry
 from detect import detect
+from handlers.base import ConversionError
 
 pytestmark = pytest.mark.matrix
 
@@ -146,8 +147,15 @@ def test_every_route_produces_the_format_it_claims(fixtures, tmp_path, source, t
         pytest.skip("Calibre's PDF output needs a non-root user (Chromium sandbox)")
 
     out = tmp_path / f"{source}_to.{target}"
-    registry.find_route(source, target).handler(
-        fixtures[source], out, on_progress=None)
+    try:
+        route.handler(fixtures[source], out, on_progress=None)
+    except ConversionError as exc:
+        # An optional delegate the build does not have (rsvg-convert for SVG,
+        # libheif for HEIC). The handler is right to fail; the sweep should say
+        # "not installed here" rather than "this route is broken".
+        if "delegate" in (exc.summary + exc.details).lower():
+            pytest.skip(f"this build lacks the delegate for {source}->{target}")
+        raise
 
     assert out.exists() and out.stat().st_size > 0
     detected = detect(out, out.name)
