@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
@@ -28,6 +29,24 @@ SWEEP_INTERVAL_SECONDS = 600
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def exposed_bind_address() -> str | None:
+    """The address this server was told to bind, if it is not this machine.
+
+    Best effort, and read from the command line because uvicorn does not hand
+    the running app its own bind address. It catches the case that matters --
+    someone running `uvicorn main:app --host 0.0.0.0` and putting a service
+    that writes files onto their local network -- rather than every case.
+    """
+    host = os.environ.get("UVICORN_HOST")
+    if "--host" in sys.argv:
+        index = sys.argv.index("--host")
+        if index + 1 < len(sys.argv):
+            host = sys.argv[index + 1]
+    if host is None or host in ("127.0.0.1", "localhost", "::1"):
+        return None
+    return host
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     jobs.TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,6 +59,11 @@ async def lifespan(app: FastAPI):
         print(f"[startup] tools not found: {', '.join(missing)} "
               f"(conversions needing them will be rejected with an explanation)")
     print(f"[startup] {process_group.status()}")
+    exposed = exposed_bind_address()
+    if exposed:
+        print(f"[startup] WARNING: bound to {exposed}, not 127.0.0.1. Anyone who "
+              f"can reach this machine can now upload files to it and read the "
+              f"results. Use --host 127.0.0.1 unless you meant to do this.")
 
     async def sweeper() -> None:
         while True:

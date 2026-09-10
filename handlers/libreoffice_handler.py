@@ -17,6 +17,33 @@ _FILTERS: dict[str, str] = {
     "csv": "csv:Text - txt - csv (StarCalc)",
 }
 
+# LibreOffice fetches remote resources a document points at -- an
+# <img src="http://..."> in an HTML file is enough -- which would let a tracking
+# pixel in a document report back the moment it was converted. base.py aims the
+# proxy environment variables at a closed port, but LibreOffice defaults to the
+# *system* proxy configuration, which on Windows comes from the OS rather than
+# from the environment. So the same block is written into the per-job profile,
+# where it holds on every platform: proxy type 1 is "manual", pointed at a port
+# nothing listens on, with no host exempted.
+_NO_NETWORK_PROFILE = """<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetProxyType" oor:op="fuse"><value>1</value></prop></item>
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyPort" oor:op="fuse"><value>1</value></prop></item>
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyPort" oor:op="fuse"><value>1</value></prop></item>
+ <item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetNoProxy" oor:op="fuse"><value></value></prop></item>
+</oor:items>
+"""
+
+
+def _seal_profile(profile: Path) -> None:
+    """Write the no-network settings into a fresh LibreOffice user profile."""
+    user_dir = profile / "user"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / "registrymodifications.xcu").write_text(
+        _NO_NETWORK_PROFILE, encoding="utf-8")
+
 
 def convert_office(src: Path, dst: Path,
                    on_progress: Callable[[float], None] | None = None) -> None:
@@ -30,6 +57,7 @@ def convert_office(src: Path, dst: Path,
     work = dst.parent / f".lo_{uuid.uuid4().hex[:8]}"
     work.mkdir(parents=True, exist_ok=True)
     profile = work / "profile"
+    _seal_profile(profile)
 
     argv = [
         binary,
