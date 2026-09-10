@@ -35,10 +35,33 @@ foreach ($dir in @("handlers", "static")) {
     }
 }
 
+# Windows ships a placeholder python.exe in WindowsApps that is not Python: run
+# it and it prints "Python was not found" and offers to open the Microsoft
+# Store. It sits ahead of a real install on PATH often enough that plain
+# "python" is not a safe way to find an interpreter.
+function Find-Python {
+    foreach ($name in @("py", "python", "python3")) {
+        $found = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
+                 Select-Object -First 1
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
-    Write-Host "Creating virtual environment..."
-    py -m venv .venv
+    $bootstrap = Find-Python
+    if (-not $bootstrap) {
+        Fail ("no usable Python was found.`n`n" +
+              "'python' here resolves to the Microsoft Store placeholder, which is not`n" +
+              "an interpreter. Install Python 3.11 or newer from`n" +
+              "  https://www.python.org/downloads/`n" +
+              "ticking 'Add python.exe to PATH', or turn the alias off under`n" +
+              "  Settings > Apps > Advanced app settings > App execution aliases.")
+    }
+    Write-Host "Creating virtual environment using $bootstrap ..."
+    & $bootstrap -m venv .venv
     if (-not (Test-Path $python)) {
         Fail ("the virtual environment was created but contains no python.exe.`n" +
               "On this machine that usually means the Python install is split across`n" +

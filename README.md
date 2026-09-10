@@ -36,11 +36,21 @@ git clone https://github.com/0xphoenixlabs/Local-File-Converter.git
 cd Local-File-Converter
 ```
 
-**Windows**
+**Windows** — from Command Prompt, or by double-clicking it:
+
+```bat
+run.bat
+```
+
+From PowerShell, either that or the script it wraps:
 
 ```powershell
 .\run.ps1
 ```
+
+`run.bat` exists because Command Prompt cannot run a `.ps1` file: typing
+`.\run.ps1` there does nothing at all, with no error. It also sidesteps the
+execution policy that blocks scripts which arrived inside a downloaded ZIP.
 
 **macOS / Linux**
 
@@ -48,18 +58,29 @@ cd Local-File-Converter
 ./run.sh
 ```
 
-Either script creates a virtualenv, installs dependencies, and starts the
-server. Open <http://127.0.0.1:8000> and drop a file on the page.
+Any of these creates a virtualenv, installs dependencies, checks that the app
+loads, and starts the server. Open <http://127.0.0.1:8000> and drop a file on
+the page.
 
-By hand, if you prefer:
+By hand, if you prefer. **Windows:**
+
+```bat
+py -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn main:app --port 8000
+```
+
+**macOS / Linux:**
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt   # .venv\Scripts on Windows
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m uvicorn main:app --port 8000
 ```
 
-Requires **Python 3.11+**.
+Requires **Python 3.11+**. On Windows use `py`, not `python`: a stock Windows
+has a placeholder `python.exe` that only prints "Python was not found" and
+offers to open the Microsoft Store. The start scripts skip it automatically.
 
 ## Installing the conversion tools
 
