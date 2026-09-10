@@ -8,9 +8,10 @@ say so in the issue without the details and a private channel can be arranged.
 ## What this app is
 
 A web server on `127.0.0.1` that accepts a file, hands it to a conversion tool
-installed on the same machine, and hands back the result. It has no accounts, no
-authentication, and no network access of its own. It is designed for one person
-running it on their own computer.
+installed on the same machine, and hands back the result. It has no accounts and
+no authentication, and its own code never opens a network connection. It does
+start the conversion tools as subprocesses; what those are permitted to do is
+covered below. It is designed for one person running it on their own computer.
 
 ## The threat model it is built for
 
@@ -30,6 +31,14 @@ running it on their own computer.
   force-killed server does not leave a transcode running. Uploads are capped
   (`MAX_UPLOAD_MB`, default 500) and streamed to disk, so the cap applies before
   a large file is buffered into memory.
+
+## Where files live
+
+Uploads and results are written under `temp/`, in a directory per job. They are
+removed with the job an hour after it finishes, on a ten-minute sweep while the
+server runs, and again at startup. They are deleted, not shredded: the bytes are
+unlinked rather than overwritten, so disk-recovery tooling could still find them.
+If that matters, put the checkout on an encrypted volume.
 
 ## What it does not defend against
 

@@ -10,7 +10,11 @@ Calibre — battle-tested tools that already do this better than any hand-rolled
 code would.
 
 **192 conversion routes** across images, video, audio, documents, spreadsheets,
-slides and ebooks.
+slides and ebooks. That is the number of source-to-target pairs the router
+knows; how many work on your machine depends on which of the five tools you
+install, and for some image formats on how your build of ImageMagick was
+compiled. `GET /health` and `GET /supported` tell you what is actually
+available, and nothing is ever silently substituted.
 
 ---
 
@@ -22,11 +26,16 @@ than promised.
 **What is guaranteed, and checked by `tests/test_privacy.py`:**
 
 - **The server is only reachable from this machine.** It binds `127.0.0.1`.
-  Uvicorn's own default is loopback, and the start scripts pin it explicitly. If
-  it ever starts on a non-loopback address it says so, loudly, at startup.
-- **The app has no way to reach the internet.** No module in it imports an HTTP
-  client. There is no telemetry, no analytics, no update check, no crash
-  reporting, and no "anonymous usage statistics."
+  Uvicorn's own default is loopback, and the start scripts pin it explicitly.
+  It also prints a warning if it detects a non-loopback bind, but that check is
+  best effort: it reads the command line, so it catches
+  `uvicorn main:app --host 0.0.0.0` and not every possible way of starting the
+  server. Treat it as a reminder, not a control.
+- **The app's own code never opens a network connection.** No module in it
+  imports an HTTP client. There is no telemetry, no analytics, no update check,
+  no crash reporting, and no "anonymous usage statistics." It does start the
+  conversion tools as subprocesses, which is a separate question, covered
+  below.
 - **The page loads nothing from the internet.** No CDN, no web fonts, no
   scripts, no tracking pixel. Every request it makes is a relative path back to
   your own server. Open your browser's network tab and watch.
@@ -39,7 +48,10 @@ than promised.
   the remote resource. There is a test that converts exactly such a document
   against a local listener and fails if anything is requested.
 - **Files do not linger.** Uploads and results live under `temp/`, are deleted
-  with their job an hour after it finishes, and are swept on every startup.
+  with their job an hour after it finishes, swept every ten minutes while the
+  server runs, and swept again on every startup. They are *deleted*, not
+  shredded: the bytes are unlinked, not overwritten, so recovery tooling could
+  still find them on the disk afterwards.
 
 **What is not claimed:**
 
@@ -53,13 +65,48 @@ than promised.
   reach it the ability to upload files and run these tools on your machine.
   There is no authentication. Do not do it.
 
-See [SECURITY.md](SECURITY.md) for the full threat model.
+### Check it yourself
+
+Do not take the above on faith. Every claim is observable from a clean checkout:
+
+```bash
+# 1. The privacy claims, run as tests. This includes converting a document that
+#    contains a tracking pixel aimed at a local listener, and failing if a
+#    single request arrives.
+pytest tests/test_privacy.py -v
+
+# 2. Every place the code could reach the network. Expect no HTTP client.
+grep -rnE "import (requests|urllib|httpx|aiohttp|socket|http\.client)" *.py handlers/
+
+# 3. Everything the web page references.
+grep -rnoE "https?://[^\"' )]+" static/
+```
+
+Command 2 prints nothing. Command 3 prints exactly one line:
+
+```
+static/index.html:9:http://www.w3.org/2000/svg
+```
+
+That is the SVG XML namespace on the upload icon. A namespace is an identifier,
+not an address — no browser ever requests it — and it is the only thing in the
+whole frontend that even looks like a URL. There is a test that allows that one
+namespace by name and fails on any other URL, so it cannot become cover for a
+real one.
+
+Then open the app, press F12, and watch the Network tab through a whole
+conversion. Every request should be to `127.0.0.1` and nothing else. If you
+find otherwise, that is a bug worth an issue.
+
+See [SECURITY.md](SECURITY.md) for the full threat model, including what is
+deliberately **not** defended against.
 
 ---
 
 ## Contents
 
 - [Privacy](#privacy)
+  - [Check it yourself](#check-it-yourself)
 - [Quick start](#quick-start)
 - [Installing the conversion tools](#installing-the-conversion-tools)
 - [Supported conversions](#supported-conversions)
@@ -76,7 +123,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 ## Quick start
 
 ```bash
-git clone https://github.com/0xphoenixlabs/Local-File-Converter.git
+git clone https://github.com/WildOwlLab/Local-File-Converter.git
 cd Local-File-Converter
 ```
 
@@ -152,14 +199,22 @@ macOS.
 
 | Family | Sources | Targets |
 |---|---|---|
-| Images | png, jpg, webp, bmp, tiff, gif, avif, heic\*, svg\*, ico | png, jpg, webp, bmp, tiff, gif, avif, ico, pdf |
+| Images | png, jpg, webp, bmp, tiff, gif, avif†, heic\*†, svg\*†, ico | png, jpg, webp, bmp, tiff, gif, avif†, ico, pdf |
 | Video | mp4, mov, webm, avi, mkv | mp4, mov, webm, mkv, gif, plus any audio target |
 | Audio | mp3, wav, flac, ogg, m4a | mp3, wav, flac, ogg |
 | Markup | md, html, rst, txt, docx, epub | md, html, rst, txt, docx, epub |
 | Office | docx, odt, rtf, xlsx, ods, csv, pptx, odp | the rest of their own family, plus pdf |
 | Ebooks | epub, mobi, azw3, fb2 | epub, mobi, azw3, fb2, pdf |
 
-\* input only.
+\* Input only. HEIC and SVG can be read but not written.
+
+† Handled by an optional ImageMagick delegate, so availability depends on your
+build rather than on this app. AVIF and HEIC in particular ship read-only in
+Debian's and Ubuntu's ImageMagick 6 packages. Run `magick -list format`
+(`convert -list format` on v6) and look at the three-character mode column:
+`rw-` means read and write, `r--` means read only. A format this app offers but
+your build cannot write is refused with a message saying so, never silently
+converted into something else.
 
 Pairs with no single tool behind them are still reachable through one
 intermediate format — Markdown to PDF, EPUB to ODT, a video frame to PNG. The
@@ -307,7 +362,10 @@ Two tool-specific details worth knowing:
   directory and moves the result to the exact requested path. It also passes
   `-env:UserInstallation=<per-job profile>`, because concurrent headless
   invocations otherwise collide over the shared user profile and one of them
-  silently produces nothing.
+  silently produces nothing. That per-job profile is written with proxy
+  settings pointing at a closed port, because LibreOffice otherwise defaults to
+  the *system* proxy configuration — which on Windows does not come from the
+  environment, so the environment-level block alone would not hold there.
 - **ImageMagick 7** is invoked as `magick in out`. The v6 compatibility shim
   (`magick convert`) still works but prints a deprecation warning to stderr on
   every run, which then gets mistaken for the error message when something
@@ -338,7 +396,7 @@ back in, and nothing is left half-written.
 ```bash
 pip install -r requirements-dev.txt
 pytest              # the default suite
-pytest -m matrix    # every route, for real -- minutes, needs all five tools
+pytest -m matrix    # every route this machine can run -- minutes, all five tools
 ruff check .        # lint
 ```
 
@@ -346,6 +404,11 @@ The tests need no external tools — anything that shells out to one is skipped
 automatically when that tool is missing, so the suite is meaningful on a bare
 checkout and more thorough on a fully-equipped machine. Sample files are
 generated at runtime rather than committed.
+
+`-m matrix` runs every route in the registry against real files and checks the
+output's magic bytes. It does not silently pass what it cannot test: a route
+needing a tool you have not installed, or an ImageMagick delegate your build
+lacks, is skipped with the reason printed. Run it with `-rs` to see the list.
 
 ```
 ├── main.py                  FastAPI app, routes, job runner
@@ -429,8 +492,9 @@ read-only. Asked to write a format it has no encoder for, ImageMagick prints a
 *warning*, exits 0, and writes the image in some other format -- so you get a
 valid, non-empty file that is not what you asked for. The handler treats that
 warning as a failure rather than handing back a mislabelled file. Run
-`magick -list format` (or `convert -list format` on v6) to see what your build
-can actually write; the `rw-` column is the one that matters.
+`magick -list format` (or `convert -list format` on v6) and read the
+three-character mode column: `rw-` means the format can be read and written,
+`r--` means read only.
 
 **PDF only converts one way.** Converting *to* PDF works from images, office
 documents and ebooks. Converting *from* PDF is not offered: rasterising a PDF
