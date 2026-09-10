@@ -324,6 +324,19 @@ entry in `binaries.TOOLS` so `/health` can report on it.
 
 ## Troubleshooting
 
+**The start script printed a link, but the browser will not open it.** The
+server exited immediately after the script printed the URL. Run the script from
+a terminal rather than by double-clicking it, so the window stays open and the
+error above the link is readable.
+
+The usual cause is an incomplete copy of the project. A ZIP downloaded from a
+branch that has no `handlers/` or `static/` directory still looks complete,
+because every top-level file is there, and the app then fails to import. Both
+start scripts check for this before anything else and name the missing folder.
+`git clone` gets you the whole repository; GitHub's "Download ZIP" button gives
+you whichever branch you happen to be looking at, which is not necessarily the
+one you want.
+
 **A conversion fails with "not installed."** That tool is missing. The message
 names it and gives the install command; `/health` lists everything at once.
 
