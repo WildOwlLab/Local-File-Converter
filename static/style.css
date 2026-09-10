@@ -1,0 +1,151 @@
+/* Elements are shown and hidden through the `hidden` attribute, so this rule
+   is load-bearing. The UA stylesheet's [hidden] { display: none } loses to any
+   class that sets `display` -- our .card sets `display: block` -- and the
+   result is a Download button and a progress bar that are visible before the
+   conversion has even started. !important is the fix, not laziness. */
+[hidden] { display: none !important; }
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #14161a;
+  --muted: #646b76;
+  --line: #e2e5ea;
+  --accent: #2b62d9;
+  --accent-ink: #ffffff;
+  --ok: #157347;
+  --ok-bg: #e9f6ee;
+  --bad: #b3261e;
+  --bad-bg: #fdecea;
+  --warn: #8a5a00;
+  --warn-bg: #fff5e0;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --panel: #1c1f25; --ink: #eceef1; --muted: #9aa2ae;
+    --line: #2c313a; --accent: #5b8cff; --accent-ink: #0d1117;
+    --ok: #57c98a; --ok-bg: #14251c; --bad: #ff8078; --bad-bg: #2a1715;
+    --warn: #e0b054; --warn-bg: #2a2113;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2.5rem 1rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.shell { max-width: 640px; margin: 0 auto; display: grid; gap: 1rem; }
+
+.head { text-align: center; margin-bottom: 0.5rem; }
+h1 { margin: 0 0 0.35rem; font-size: 1.6rem; letter-spacing: -0.01em; }
+.sub { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+.card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+.card.ok  { border-color: var(--ok);  background: var(--ok-bg); }
+.card.bad { border-color: var(--bad); background: var(--bad-bg); }
+
+.drop {
+  display: grid;
+  place-items: center;
+  gap: 0.15rem;
+  padding: 2.75rem 1rem;
+  background: var(--panel);
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop:focus-visible { border-color: var(--accent); outline: none; }
+.drop.over { border-color: var(--accent); background: var(--ok-bg); }
+.drop-icon {
+  width: 34px; height: 34px; fill: none;
+  stroke: var(--muted); stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.drop-title { margin: 0.6rem 0 0; font-weight: 600; }
+.drop-hint { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+.file-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.file-meta { min-width: 0; }
+.file-name {
+  margin: 0; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-detail { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.87rem; }
+
+.label { display: block; font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+.picker-row { display: flex; gap: 0.6rem; }
+select {
+  flex: 1; min-width: 0;
+  padding: 0.55rem 0.6rem;
+  font: inherit; color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.hint { margin: 0.55rem 0 0; color: var(--muted); font-size: 0.85rem; }
+
+.primary {
+  padding: 0.55rem 1.1rem;
+  font: inherit; font-weight: 600;
+  color: var(--accent-ink); background: var(--accent);
+  border: 0; border-radius: 8px; cursor: pointer;
+}
+.primary:disabled { opacity: 0.55; cursor: default; }
+.as-link { display: inline-block; text-decoration: none; margin-top: 0.5rem; }
+.link-btn {
+  flex: none; padding: 0; font: inherit; font-size: 0.87rem;
+  color: var(--accent); background: none; border: 0; cursor: pointer;
+  text-decoration: underline;
+}
+
+.progress-head {
+  display: flex; justify-content: space-between;
+  font-size: 0.87rem; color: var(--muted); margin-bottom: 0.5rem;
+}
+.track { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.bar { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+
+/* Only FFmpeg reports real progress. Everything else gets a moving bar rather
+   than an invented percentage, because a number nobody measured is a lie. */
+.bar.indeterminate {
+  width: 35% !important;
+  animation: slide 1.15s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.banner {
+  margin: 0; padding: 0.6rem 0.75rem;
+  border-radius: 8px; font-size: 0.88rem;
+}
+.banner.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid currentColor; }
+.banner.inline { margin-top: 0.75rem; }
+
+.result-title { margin: 0 0 0.2rem; font-weight: 700; }
+.card.ok  .result-title { color: var(--ok); }
+.card.bad .result-title { color: var(--bad); }
+.result-name { margin: 0; color: var(--muted); font-size: 0.88rem; word-break: break-all; }
+#error-summary { margin: 0; }
+details { margin-top: 0.6rem; font-size: 0.85rem; }
+summary { cursor: pointer; color: var(--muted); }
+pre {
+  margin: 0.5rem 0 0; padding: 0.6rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  max-height: 220px; overflow: auto;
+  font-size: 0.78rem; white-space: pre-wrap; word-break: break-word;
+}
